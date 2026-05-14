@@ -107,11 +107,11 @@ socket.on('roomCreated', (data) => {
 
 // 加入房间
 document.getElementById('joinBtn').addEventListener('click', () => {
-  const roomId = document.getElementById('roomIdInput').value.toUpperCase();
+  const roomId = document.getElementById('roomIdInput').value;
   const playerName = document.getElementById('playerName').value;
   
-  if (!roomId || roomId.length !== 6) {
-    showToast('请输入6位房间号');
+  if (!roomId || roomId.length !== 4 || isNaN(roomId)) {
+    showToast('请输入4位数字房间号');
     return;
   }
   
