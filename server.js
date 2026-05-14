@@ -23,11 +23,14 @@ app.get('/', (req, res) => {
 });
 
 let rooms = {};
-let apiConfig = {
-  enabled: false,
-  url: 'https://api.example.com/chat/completions',
-  apiKey: '',
-  model: 'gpt-3.5-turbo'
+let gameSettings = {
+  useAI: false,
+  whiteboardWinRounds: 2,
+  aiConfig: {
+    apiKey: 'sk-618cfaffa9df40e48553aa6f31ca7c89',
+    model: 'qwen-turbo',
+    apiBase: 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+  }
 };
 
 const defaultWords = [
@@ -40,7 +43,12 @@ const defaultWords = [
   { civilian: '苹果', undercover: '梨' },
   { civilian: '电脑', undercover: '电视' },
   { civilian: '书', undercover: '杂志' },
-  { civilian: '鞋', undercover: '袜子' }
+  { civilian: '鞋', undercover: '袜子' },
+  { civilian: '猫', undercover: '狗' },
+  { civilian: '桌子', undercover: '椅子' },
+  { civilian: '水', undercover: '饮料' },
+  { civilian: '太阳', undercover: '月亮' },
+  { civilian: '老虎', undercover: '狮子' }
 ];
 
 function getRandomWords() {
@@ -49,21 +57,21 @@ function getRandomWords() {
 }
 
 async function fetchWordsFromAI() {
-  if (!apiConfig.enabled) {
+  if (!gameSettings.useAI) {
     return getRandomWords();
   }
   
   try {
-    const response = await axios.post(apiConfig.url, {
-      model: apiConfig.model,
+    const response = await axios.post(`${gameSettings.aiConfig.apiBase}/chat/completions`, {
+      model: gameSettings.aiConfig.model,
       messages: [{
         role: 'user',
-        content: '请提供一对相似但不同的词语，用于"谁是卧底"游戏。格式为JSON：{"civilian":"平民词","undercover":"卧底词"}。要求两个词要有相似之处但不能完全相同，适合作为游戏词语。'
+        content: '请提供一对相似但不同的词语，用于"谁是卧底"游戏。格式为JSON：{"civilian":"平民词","undercover":"卧底词"}。要求两个词要有相似之处但不能完全相同，适合作为游戏词语。只返回JSON，不要其他内容。'
       }],
       max_tokens: 50
     }, {
       headers: {
-        'Authorization': `Bearer ${apiConfig.apiKey}`,
+        'Authorization': `Bearer ${gameSettings.aiConfig.apiKey}`,
         'Content-Type': 'application/json'
       }
     });
@@ -99,9 +107,14 @@ io.on('connection', (socket) => {
       players: [],
       status: 'waiting',
       currentRound: 0,
-      speakingPlayer: null,
       votes: {},
-      gameStarted: false
+      gameStarted: false,
+      hostId: null,
+      isVoting: false,
+      isPK: false,
+      pkPlayers: [],
+      whiteboardWinRounds: gameSettings.whiteboardWinRounds,
+      whiteboardSurvivedRounds: {}
     };
     
     socket.join(roomId);
@@ -132,18 +145,27 @@ io.on('connection', (socket) => {
       return;
     }
     
+    const isHost = room.players.length === 0;
+    
     room.players.push({
       id: socket.id,
       name: playerName,
       role: null,
       word: null,
-      socket: socket
+      socket: socket,
+      isHost: isHost,
+      eliminated: false,
+      canVote: true
     });
+    
+    if (isHost) {
+      room.hostId = socket.id;
+    }
     
     socket.join(roomId);
     
     io.to(roomId).emit('playerJoined', {
-      players: room.players.map(p => ({ id: p.id, name: p.name }))
+      players: room.players.map(p => ({ id: p.id, name: p.name, isHost: p.isHost, eliminated: p.eliminated }))
     });
   });
 
@@ -165,115 +187,255 @@ io.on('connection', (socket) => {
       player.role = roles[index];
       player.word = player.role === 'civilian' ? room.words.civilian : 
                    player.role === 'undercover' ? room.words.undercover : null;
+      player.eliminated = false;
+      player.canVote = true;
     });
     
     room.status = 'playing';
     room.gameStarted = true;
     room.currentRound = 1;
-    room.speakingPlayer = 0;
+    room.votes = {};
+    room.isVoting = false;
+    room.isPK = false;
+    room.pkPlayers = [];
+    room.whiteboardSurvivedRounds = {};
     
     room.players.forEach(player => {
       player.socket.emit('gameStarted', {
         role: player.role,
         word: player.word,
-        totalPlayers: room.config.totalPlayers
+        totalPlayers: room.config.totalPlayers,
+        isHost: player.isHost,
+        players: room.players.map(p => ({ id: p.id, name: p.name, role: p.role, eliminated: p.eliminated }))
       });
-    });
-    
-    io.to(roomId).emit('roundStart', {
-      round: room.currentRound,
-      speaker: room.players[0].id
     });
   });
 
-  socket.on('speak', (data) => {
-    const { roomId, content } = data;
+  socket.on('startVote', (roomId) => {
     const room = rooms[roomId];
     if (!room) return;
     
-    const player = room.players.find(p => p.id === socket.id);
-    if (!player) return;
+    if (room.status !== 'playing') return;
     
-    io.to(roomId).emit('playerSpoke', {
-      playerId: player.id,
-      playerName: player.name,
-      content
-    });
+    room.isVoting = true;
+    room.isPK = false;
+    room.votes = {};
+    room.pkPlayers = [];
     
-    room.speakingPlayer = (room.speakingPlayer + 1) % room.players.length;
-    
-    if (room.speakingPlayer === 0) {
-      room.status = 'voting';
-      room.votes = {};
-      io.to(roomId).emit('votingStart');
-    } else {
-      io.to(roomId).emit('nextSpeaker', room.players[room.speakingPlayer].id);
-    }
+    io.to(roomId).emit('voteStarted', { countdown: 10 });
   });
 
   socket.on('vote', (data) => {
     const { roomId, targetPlayerId } = data;
     const room = rooms[roomId];
     if (!room) return;
+    if (!room.isVoting) return;
+    
+    const voter = room.players.find(p => p.id === socket.id);
+    if (!voter || voter.eliminated || !voter.canVote) return;
     
     room.votes[socket.id] = targetPlayerId;
     
-    if (Object.keys(room.votes).length === room.players.length) {
-      const voteCounts = {};
-      Object.values(room.votes).forEach(vote => {
-        voteCounts[vote] = (voteCounts[vote] || 0) + 1;
-      });
-      
-      let maxVotes = 0;
-      let votedPlayerId = null;
-      for (const [playerId, count] of Object.entries(voteCounts)) {
-        if (count > maxVotes) {
-          maxVotes = count;
-          votedPlayerId = playerId;
+    io.to(roomId).emit('voteUpdated', {
+      votes: room.votes,
+      totalVoters: room.players.filter(p => !p.eliminated && p.canVote).length
+    });
+  });
+
+  socket.on('endVote', (roomId) => {
+    const room = rooms[roomId];
+    if (!room) return;
+    
+    const validPlayers = room.players.filter(p => !p.eliminated);
+    const civilianRemaining = validPlayers.filter(p => p.role === 'civilian').length;
+    const undercoverRemaining = validPlayers.filter(p => p.role === 'undercover').length;
+    const whiteboardRemaining = validPlayers.filter(p => p.role === 'whiteboard').length;
+    
+    // 检查白板获胜条件
+    let whiteboardWinner = null;
+    for (const player of validPlayers) {
+      if (player.role === 'whiteboard') {
+        room.whiteboardSurvivedRounds[player.id] = (room.whiteboardSurvivedRounds[player.id] || 0) + 1;
+        if (room.whiteboardSurvivedRounds[player.id] >= room.whiteboardWinRounds) {
+          whiteboardWinner = player;
+          break;
         }
       }
-      
-      const votedPlayer = room.players.find(p => p.id === votedPlayerId);
-      
-      io.to(roomId).emit('voteResult', {
-        playerId: votedPlayerId,
-        playerName: votedPlayer.name,
-        role: votedPlayer.role
+    }
+    
+    if (whiteboardWinner) {
+      room.status = 'ended';
+      io.to(roomId).emit('gameEnd', { 
+        winner: 'whiteboard', 
+        winnerName: whiteboardWinner.name,
+        words: room.words 
       });
-      
-      room.players = room.players.filter(p => p.id !== votedPlayerId);
-      
-      const civilianRemaining = room.players.filter(p => p.role === 'civilian').length;
-      const undercoverRemaining = room.players.filter(p => p.role === 'undercover').length;
-      
-      if (undercoverRemaining === 0) {
-        room.status = 'ended';
-        io.to(roomId).emit('gameEnd', { winner: 'civilian' });
-        delete rooms[roomId];
-      } else if (civilianRemaining <= undercoverRemaining) {
-        room.status = 'ended';
-        io.to(roomId).emit('gameEnd', { winner: 'undercover' });
-        delete rooms[roomId];
-      } else {
-        room.currentRound++;
-        room.status = 'playing';
-        room.speakingPlayer = 0;
-        
-        io.to(roomId).emit('roundStart', {
-          round: room.currentRound,
-          speaker: room.players[0].id
-        });
+      return;
+    }
+    
+    // 统计票数
+    const voteCounts = {};
+    Object.values(room.votes).forEach(vote => {
+      voteCounts[vote] = (voteCounts[vote] || 0) + 1;
+    });
+    
+    // 找出最高票数
+    let maxVotes = 0;
+    const topPlayers = [];
+    
+    for (const [playerId, count] of Object.entries(voteCounts)) {
+      if (count > maxVotes) {
+        maxVotes = count;
+        topPlayers.length = 0;
+        topPlayers.push(playerId);
+      } else if (count === maxVotes) {
+        topPlayers.push(playerId);
       }
     }
+    
+    if (topPlayers.length === 1) {
+      // 只有一个最高票，直接淘汰
+      const eliminatedPlayer = room.players.find(p => p.id === topPlayers[0]);
+      eliminatedPlayer.eliminated = true;
+      
+      io.to(roomId).emit('playerEliminated', {
+        playerId: eliminatedPlayer.id,
+        playerName: eliminatedPlayer.name,
+        role: eliminatedPlayer.role
+      });
+      
+      checkGameEnd(roomId);
+    } else if (topPlayers.length > 1) {
+      // 平票，进入PK
+      room.isPK = true;
+      room.pkPlayers = topPlayers;
+      
+      // 重置投票，只有非PK玩家可以投票
+      room.votes = {};
+      
+      room.players.forEach(p => {
+        p.canVote = !p.eliminated && !topPlayers.includes(p.id);
+      });
+      
+      io.to(roomId).emit('pkStarted', {
+        pkPlayers: topPlayers.map(id => {
+          const p = room.players.find(player => player.id === id);
+          return { id: p.id, name: p.name };
+        })
+      });
+    } else {
+      // 没有投票，继续游戏
+      room.currentRound++;
+      io.to(roomId).emit('roundChanged', { round: room.currentRound });
+    }
+    
+    room.isVoting = false;
   });
 
-  socket.on('getApiConfig', () => {
-    socket.emit('apiConfig', apiConfig);
+  socket.on('pkVote', (data) => {
+    const { roomId, targetPlayerId } = data;
+    const room = rooms[roomId];
+    if (!room) return;
+    if (!room.isPK) return;
+    
+    const voter = room.players.find(p => p.id === socket.id);
+    if (!voter || voter.eliminated || !voter.canVote) return;
+    
+    room.votes[socket.id] = targetPlayerId;
+    
+    io.to(roomId).emit('voteUpdated', {
+      votes: room.votes,
+      totalVoters: room.players.filter(p => !p.eliminated && p.canVote).length
+    });
   });
 
-  socket.on('setApiConfig', (config) => {
-    apiConfig = { ...apiConfig, ...config };
-    socket.emit('apiConfigUpdated', apiConfig);
+  socket.on('endPKVote', (roomId) => {
+    const room = rooms[roomId];
+    if (!room) return;
+    
+    const voteCounts = {};
+    Object.values(room.votes).forEach(vote => {
+      voteCounts[vote] = (voteCounts[vote] || 0) + 1;
+    });
+    
+    let maxVotes = 0;
+    let eliminatedPlayerId = null;
+    
+    for (const [playerId, count] of Object.entries(voteCounts)) {
+      if (count > maxVotes) {
+        maxVotes = count;
+        eliminatedPlayerId = playerId;
+      }
+    }
+    
+    if (eliminatedPlayerId) {
+      const eliminatedPlayer = room.players.find(p => p.id === eliminatedPlayerId);
+      eliminatedPlayer.eliminated = true;
+      
+      io.to(roomId).emit('playerEliminated', {
+        playerId: eliminatedPlayer.id,
+        playerName: eliminatedPlayer.name,
+        role: eliminatedPlayer.role
+      });
+      
+      checkGameEnd(roomId);
+    } else {
+      // PK投票也没人投，随机淘汰一个
+      const randomIndex = Math.floor(Math.random() * room.pkPlayers.length);
+      const eliminatedPlayer = room.players.find(p => p.id === room.pkPlayers[randomIndex]);
+      eliminatedPlayer.eliminated = true;
+      
+      io.to(roomId).emit('playerEliminated', {
+        playerId: eliminatedPlayer.id,
+        playerName: eliminatedPlayer.name,
+        role: eliminatedPlayer.role
+      });
+      
+      checkGameEnd(roomId);
+    }
+    
+    room.isPK = false;
+    room.pkPlayers = [];
+    room.isVoting = false;
+  });
+
+  function checkGameEnd(roomId) {
+    const room = rooms[roomId];
+    if (!room) return;
+    
+    const validPlayers = room.players.filter(p => !p.eliminated);
+    const civilianRemaining = validPlayers.filter(p => p.role === 'civilian').length;
+    const undercoverRemaining = validPlayers.filter(p => p.role === 'undercover').length;
+    
+    if (undercoverRemaining === 0) {
+      room.status = 'ended';
+      io.to(roomId).emit('gameEnd', { winner: 'civilian', words: room.words });
+      delete rooms[roomId];
+    } else if (civilianRemaining <= undercoverRemaining) {
+      room.status = 'ended';
+      io.to(roomId).emit('gameEnd', { winner: 'undercover', words: room.words });
+      delete rooms[roomId];
+    } else {
+      // 进入下一轮
+      room.currentRound++;
+      room.votes = {};
+      
+      // 重置所有玩家的投票权限
+      room.players.forEach(p => {
+        p.canVote = !p.eliminated;
+      });
+      
+      io.to(roomId).emit('roundChanged', { round: room.currentRound });
+    }
+  }
+
+  socket.on('getSettings', () => {
+    socket.emit('settings', gameSettings);
+  });
+
+  socket.on('setSettings', (settings) => {
+    gameSettings = { ...gameSettings, ...settings };
+    io.emit('settingsUpdated', gameSettings);
   });
 
   socket.on('disconnect', () => {
@@ -298,13 +460,13 @@ app.get('/api/rooms', (req, res) => {
   })));
 });
 
-app.post('/api/api-config', (req, res) => {
-  apiConfig = { ...apiConfig, ...req.body };
-  res.json(apiConfig);
+app.post('/api/settings', (req, res) => {
+  gameSettings = { ...gameSettings, ...req.body };
+  res.json(gameSettings);
 });
 
-app.get('/api/api-config', (req, res) => {
-  res.json(apiConfig);
+app.get('/api/settings', (req, res) => {
+  res.json(gameSettings);
 });
 
 const PORT = process.env.PORT || 3000;
