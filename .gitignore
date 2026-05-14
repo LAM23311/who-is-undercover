@@ -1,0 +1,20 @@
+# Node.js dependencies
+node_modules/
+
+# ngrok
+ngrok.zip
+ngrok.exe
+
+# Log files
+*.log
+
+# Environment variables
+.env
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+dist/
+build/
