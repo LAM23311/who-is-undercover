@@ -4,6 +4,11 @@ let currentRoomId = null;
 let currentRole = null;
 let currentWord = null;
 let currentRound = 1;
+let isHost = false;
+let allPlayers = [];
+let selectedVotePlayer = null;
+let voteCountdown = 10;
+let countdownTimer = null;
 
 const screens = {
   mainMenu: document.getElementById('mainMenu'),
@@ -97,7 +102,6 @@ document.getElementById('createBtn').addEventListener('click', () => {
 
 socket.on('roomCreated', (data) => {
   currentRoomId = data.roomId;
-  document.getElementById('creatorName').value = '';
   
   socket.emit('joinRoom', {
     roomId: currentRoomId,
@@ -131,6 +135,9 @@ socket.on('playerJoined', (data) => {
   data.players.forEach(player => {
     const li = document.createElement('li');
     li.textContent = player.name;
+    if (player.isHost) {
+      li.innerHTML += ' <span class="host-badge">房主</span>';
+    }
     playersList.appendChild(li);
   });
   
@@ -170,7 +177,6 @@ document.getElementById('copyRoomIdBtn').addEventListener('click', async () => {
     await navigator.clipboard.writeText(currentRoomId);
     showToast('房间号已复制到剪贴板');
   } catch (err) {
-    // 降级方案
     const textArea = document.createElement('textarea');
     textArea.value = currentRoomId;
     document.body.appendChild(textArea);
@@ -216,13 +222,31 @@ document.getElementById('startGameBtn').addEventListener('click', () => {
 socket.on('gameStarted', (data) => {
   currentRole = data.role;
   currentWord = data.word;
+  currentRound = 1;
+  isHost = data.isHost;
+  allPlayers = data.players;
+  
   displayGameInfo();
+  renderGamePlayers();
+  
+  if (isHost) {
+    document.getElementById('hostControls').style.display = 'block';
+    document.getElementById('startVoteBtn').style.display = 'block';
+    document.getElementById('pkVoteBtn').style.display = 'none';
+  } else {
+    document.getElementById('hostControls').style.display = 'none';
+  }
+  
+  document.getElementById('voteTimer').style.display = 'none';
+  document.getElementById('pkStatus').style.display = 'none';
+  document.getElementById('voteControls').style.display = 'none';
+  
   showScreen('gameScreen');
 });
 
 function displayGameInfo() {
-  const roleText = document.querySelector('.card-header');
-  const wordText = document.querySelector('.card-word');
+  const roleText = document.querySelector('#identityCard .card-header');
+  const wordText = document.querySelector('#identityCard .card-word');
   
   if (currentRole === 'civilian') {
     roleText.textContent = '你的身份：平民';
@@ -238,104 +262,140 @@ function displayGameInfo() {
   wordText.textContent = currentWord || '???';
 }
 
-socket.on('roundStart', (data) => {
-  currentRound = data.round;
-  document.querySelector('.round-info').textContent = `第 ${currentRound} 轮`;
-  updateSpeaker(data.speaker);
-});
-
-function updateSpeaker(speakerId) {
-  const indicator = document.getElementById('speakerIndicator');
+function renderGamePlayers() {
+  const list = document.getElementById('gamePlayersList');
+  list.innerHTML = '';
   
-  const playersList = document.getElementById('playersList');
-  const players = Array.from(playersList.querySelectorAll('li'));
-  const speakerName = players.find((_, index) => index === 0)?.textContent || '未知玩家';
-  
-  indicator.textContent = `${speakerName} 正在发言...`;
-  
-  const speakBtn = document.getElementById('speakBtn');
-  const speakInput = document.getElementById('speakInput');
-  
-  if (speakerId === socket.id) {
-    speakBtn.disabled = false;
-    speakInput.disabled = false;
-    speakInput.focus();
-  } else {
-    speakBtn.disabled = true;
-    speakInput.disabled = true;
-  }
+  allPlayers.forEach(player => {
+    const li = document.createElement('li');
+    li.dataset.playerId = player.id;
+    li.textContent = player.name;
+    
+    if (player.eliminated) {
+      li.classList.add('eliminated');
+    }
+    
+    li.addEventListener('click', () => {
+      if (player.eliminated) return;
+      
+      document.querySelectorAll('#gamePlayersList li').forEach(item => {
+        item.classList.remove('selected');
+      });
+      
+      li.classList.add('selected');
+      selectedVotePlayer = player.id;
+    });
+    
+    list.appendChild(li);
+  });
 }
 
-// 发言
-document.getElementById('speakBtn').addEventListener('click', () => {
-  const content = document.getElementById('speakInput').value.trim();
-  
-  if (!content) {
-    showToast('请输入发言内容');
+// 房主开始投票
+document.getElementById('startVoteBtn').addEventListener('click', () => {
+  socket.emit('startVote', currentRoomId);
+});
+
+// PK投票
+document.getElementById('pkVoteBtn').addEventListener('click', () => {
+  socket.emit('endPKVote', currentRoomId);
+});
+
+// 提交投票
+document.getElementById('submitVoteBtn').addEventListener('click', () => {
+  if (!selectedVotePlayer) {
+    showToast('请选择要投票的玩家');
     return;
   }
   
-  socket.emit('speak', {
+  socket.emit('vote', {
     roomId: currentRoomId,
-    content
+    targetPlayerId: selectedVotePlayer
   });
   
-  document.getElementById('speakInput').value = '';
+  document.getElementById('submitVoteBtn').style.display = 'none';
 });
 
-socket.on('playerSpoke', (data) => {
-  const chatMessages = document.getElementById('chatMessages');
-  const messageItem = document.createElement('div');
-  messageItem.className = 'message-item';
-  messageItem.innerHTML = `
-    <div class="sender">${data.playerName}</div>
-    <div class="content">${data.content}</div>
-  `;
-  chatMessages.appendChild(messageItem);
-  chatMessages.scrollTop = chatMessages.scrollHeight;
-});
-
-socket.on('nextSpeaker', (speakerId) => {
-  updateSpeaker(speakerId);
-});
-
-// 投票阶段
-socket.on('votingStart', () => {
-  showScreen('votingScreen');
-  renderVotingPlayers();
-});
-
-function renderVotingPlayers() {
-  const playersList = document.getElementById('playersList');
-  const players = Array.from(playersList.querySelectorAll('li')).map(li => ({
-    id: '',
-    name: li.textContent
-  }));
+socket.on('voteStarted', (data) => {
+  voteCountdown = data.countdown;
   
-  const votingPlayers = document.getElementById('votingPlayers');
-  votingPlayers.innerHTML = '';
+  document.getElementById('voteTimer').style.display = 'block';
+  document.getElementById('voteControls').style.display = 'block';
+  document.getElementById('submitVoteBtn').style.display = 'block';
+  document.getElementById('pkStatus').style.display = 'none';
   
-  players.forEach(player => {
-    if (player.name) {
-      const card = document.createElement('div');
-      card.className = 'player-card';
-      card.innerHTML = `<div class="name">${player.name}</div>`;
-      card.addEventListener('click', () => {
-        document.querySelectorAll('.player-card').forEach(c => c.classList.remove('selected'));
-        card.classList.add('selected');
-        
-        socket.emit('vote', {
-          roomId: currentRoomId,
-          targetPlayerId: player.id
-        });
-      });
-      votingPlayers.appendChild(card);
+  if (isHost) {
+    document.getElementById('hostControls').style.display = 'none';
+  }
+  
+  updateCountdown();
+  
+  countdownTimer = setInterval(() => {
+    voteCountdown--;
+    updateCountdown();
+    
+    if (voteCountdown <= 0) {
+      clearInterval(countdownTimer);
+      socket.emit('endVote', currentRoomId);
     }
-  });
+  }, 1000);
+});
+
+function updateCountdown() {
+  document.getElementById('timerCountdown').textContent = voteCountdown;
 }
 
-// 投票结果
-socket.on('voteResult', (data) => {
+socket.on('voteUpdated', (data) => {
+  // 可以在这里更新投票进度显示
+});
+
+socket.on('pkStarted', (data) => {
+  clearInterval(countdownTimer);
+  document.getElementById('voteTimer').style.display = 'none';
+  
+  document.getElementById('pkStatus').style.display = 'block';
+  document.getElementById('pkPlayer1').textContent = data.pkPlayers[0]?.name || '';
+  document.getElementById('pkPlayer2').textContent = data.pkPlayers[1]?.name || '';
+  
+  // 更新玩家列表，高亮PK玩家
+  const list = document.getElementById('gamePlayersList');
+  const items = list.querySelectorAll('li');
+  
+  items.forEach(item => {
+    const playerId = item.dataset.playerId;
+    const isPK = data.pkPlayers.some(p => p.id === playerId);
+    
+    if (isPK) {
+      item.classList.add('pk-player');
+      item.classList.remove('selected');
+      item.style.pointerEvents = 'none';
+    } else if (!item.classList.contains('eliminated')) {
+      item.classList.remove('pk-player');
+      item.style.pointerEvents = 'auto';
+    }
+  });
+  
+  selectedVotePlayer = null;
+  
+  if (isHost) {
+    document.getElementById('hostControls').style.display = 'block';
+    document.getElementById('startVoteBtn').style.display = 'none';
+    document.getElementById('pkVoteBtn').style.display = 'block';
+  } else {
+    document.getElementById('voteControls').style.display = 'block';
+    document.getElementById('submitVoteBtn').style.display = 'block';
+  }
+});
+
+socket.on('playerEliminated', (data) => {
+  clearInterval(countdownTimer);
+  
+  const player = allPlayers.find(p => p.id === data.playerId);
+  if (player) {
+    player.eliminated = true;
+  }
+  
+  renderGamePlayers();
+  
   showScreen('voteResult');
   
   const resultIcon = document.querySelector('#voteResult .result-icon');
@@ -362,6 +422,34 @@ socket.on('voteResult', (data) => {
 
 document.getElementById('continueBtn').addEventListener('click', () => {
   showScreen('gameScreen');
+  
+  if (isHost) {
+    document.getElementById('hostControls').style.display = 'block';
+    document.getElementById('startVoteBtn').style.display = 'block';
+    document.getElementById('pkVoteBtn').style.display = 'none';
+  }
+  
+  document.getElementById('voteTimer').style.display = 'none';
+  document.getElementById('pkStatus').style.display = 'none';
+  document.getElementById('voteControls').style.display = 'none';
+});
+
+socket.on('roundChanged', (data) => {
+  currentRound = data.round;
+  document.querySelector('.round-info').textContent = `第 ${currentRound} 轮`;
+  
+  // 更新玩家投票权限
+  allPlayers.forEach(p => {
+    if (!p.eliminated) {
+      const item = document.querySelector(`#gamePlayersList li[data-player-id="${p.id}"]`);
+      if (item) {
+        item.style.pointerEvents = 'auto';
+        item.classList.remove('pk-player');
+      }
+    }
+  });
+  
+  selectedVotePlayer = null;
 });
 
 // 游戏结束
@@ -376,13 +464,22 @@ socket.on('gameEnd', (data) => {
     resultIcon.textContent = '🏆';
     resultTitle.textContent = '平民胜利！';
     resultContent.textContent = currentRole === 'civilian' ? '恭喜你获得胜利！' : '卧底被全部找出，平民胜利！';
-  } else {
+  } else if (data.winner === 'undercover') {
     resultIcon.textContent = '🎭';
     resultTitle.textContent = '卧底胜利！';
     resultContent.textContent = currentRole === 'undercover' ? '恭喜你获得胜利！' : '平民被淘汰至与卧底人数相同，卧底胜利！';
+  } else if (data.winner === 'whiteboard') {
+    resultIcon.textContent = '🤍';
+    resultTitle.textContent = '白板胜利！';
+    resultContent.textContent = currentRole === 'whiteboard' ? `恭喜你连续${currentRound}轮未被淘汰，获得胜利！` : `${data.winnerName} 连续${currentRound}轮未被淘汰，白板胜利！`;
   }
   
-  socket.emit('getRoomWords', currentRoomId);
+  // 显示词语
+  if (data.words) {
+    document.querySelector('.words-reveal').style.display = 'block';
+    document.querySelector('.words-reveal .word-highlight:first-child').textContent = data.words.civilian;
+    document.querySelector('.words-reveal .word-highlight:last-child').textContent = data.words.undercover;
+  }
 });
 
 document.getElementById('backToMenuBtn').addEventListener('click', () => {
@@ -390,39 +487,32 @@ document.getElementById('backToMenuBtn').addEventListener('click', () => {
   currentRole = null;
   currentWord = null;
   currentRound = 1;
+  isHost = false;
+  allPlayers = [];
+  selectedVotePlayer = null;
   showScreen('mainMenu');
 });
 
 // 设置页面
 function loadSettings() {
-  socket.emit('getApiConfig');
+  socket.emit('getSettings');
 }
 
-socket.on('apiConfig', (config) => {
-  document.getElementById('useAI').checked = config.enabled;
-  document.getElementById('apiUrl').value = config.url;
-  document.getElementById('apiKey').value = config.apiKey;
-  document.getElementById('modelName').value = config.model;
-  
-  document.getElementById('aiConfig').classList.toggle('hidden', !config.enabled);
-});
-
-document.getElementById('useAI').addEventListener('change', (e) => {
-  document.getElementById('aiConfig').classList.toggle('hidden', !e.target.checked);
+socket.on('settings', (settings) => {
+  document.getElementById('useAI').checked = settings.useAI;
+  document.getElementById('whiteboardWinRounds').value = settings.whiteboardWinRounds;
 });
 
 document.getElementById('saveSettingsBtn').addEventListener('click', () => {
   const config = {
-    enabled: document.getElementById('useAI').checked,
-    url: document.getElementById('apiUrl').value,
-    apiKey: document.getElementById('apiKey').value,
-    model: document.getElementById('modelName').value
+    useAI: document.getElementById('useAI').checked,
+    whiteboardWinRounds: parseInt(document.getElementById('whiteboardWinRounds').value)
   };
   
-  socket.emit('setApiConfig', config);
+  socket.emit('setSettings', config);
   showToast('设置已保存');
 });
 
-socket.on('apiConfigUpdated', () => {
+socket.on('settingsUpdated', () => {
   showToast('设置已更新');
 });

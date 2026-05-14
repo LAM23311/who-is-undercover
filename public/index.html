@@ -87,22 +87,17 @@
       <div class="form-container">
         <div class="form-group">
           <label class="toggle-label">
-            <input type="checkbox" id="useAI"> 使用AI生成词语
+            <input type="checkbox" id="useAI"> 使用AI生成词语（内置阿里云通义千问）
           </label>
         </div>
-        <div id="aiConfig" class="hidden">
-          <div class="form-group">
-            <label>API地址</label>
-            <input type="text" id="apiUrl" placeholder="https://api.example.com/chat/completions">
+        <div class="form-group">
+          <label>白板获胜轮数</label>
+          <div class="number-input">
+            <button class="num-btn" onclick="adjustNumber('whiteboardWinRounds', -1)">-</button>
+            <input type="number" id="whiteboardWinRounds" value="2" min="1" max="5">
+            <button class="num-btn" onclick="adjustNumber('whiteboardWinRounds', 1)">+</button>
           </div>
-          <div class="form-group">
-            <label>API密钥</label>
-            <input type="password" id="apiKey" placeholder="sk-...">
-          </div>
-          <div class="form-group">
-            <label>模型名称</label>
-            <input type="text" id="modelName" placeholder="gpt-3.5-turbo">
-          </div>
+          <span class="hint">白板连续X轮未被淘汰即可获胜</span>
         </div>
         <button id="saveSettingsBtn" class="btn btn-primary full-width">保存设置</button>
       </div>
@@ -154,16 +149,37 @@
         <div class="card-word">{{wordText}}</div>
       </div>
 
-      <!-- 发言区域 -->
-      <div class="speaking-area">
-        <div class="speaker-indicator" id="speakerIndicator"></div>
-        <div class="chat-messages" id="chatMessages"></div>
+      <!-- 投票倒计时 -->
+      <div class="vote-timer" id="voteTimer" style="display: none;">
+        <div class="timer-circle">
+          <span id="timerCountdown">10</span>
+        </div>
+        <div class="timer-text">请在 {{countdown}} 秒内完成投票</div>
       </div>
 
-      <!-- 操作区域 -->
-      <div class="action-area">
-        <input type="text" id="speakInput" placeholder="请描述你的词语..." maxlength="50">
-        <button id="speakBtn" class="btn btn-primary">发送</button>
+      <!-- PK状态 -->
+      <div class="pk-status" id="pkStatus" style="display: none;">
+        <span class="pk-badge">PK</span>
+        <div class="pk-players">
+          <span id="pkPlayer1"></span> VS <span id="pkPlayer2"></span>
+        </div>
+      </div>
+
+      <!-- 玩家列表 -->
+      <div class="players-list game-players">
+        <h3>玩家列表</h3>
+        <ul id="gamePlayersList"></ul>
+      </div>
+
+      <!-- 房主操作按钮 -->
+      <div class="host-controls" id="hostControls" style="display: none;">
+        <button id="startVoteBtn" class="btn btn-primary">开始投票</button>
+        <button id="pkVoteBtn" class="btn btn-danger">PK投票</button>
+      </div>
+
+      <!-- 投票按钮 -->
+      <div class="vote-controls" id="voteControls" style="display: none;">
+        <button id="submitVoteBtn" class="btn btn-primary">确认投票</button>
       </div>
     </div>
 

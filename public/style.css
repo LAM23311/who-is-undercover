@@ -494,6 +494,169 @@ body {
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
+/* 投票倒计时 */
+.vote-timer {
+  background: rgba(255,255,255,0.95);
+  border-radius: 15px;
+  padding: 20px;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.timer-circle {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+  margin: 0 auto 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+.timer-circle span {
+  color: white;
+  font-size: 36px;
+  font-weight: bold;
+}
+
+.timer-text {
+  color: #dc3545;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+/* PK状态 */
+.pk-status {
+  background: rgba(255,255,255,0.95);
+  border-radius: 15px;
+  padding: 20px;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.pk-badge {
+  background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+  color: white;
+  padding: 5px 20px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: bold;
+  margin-bottom: 15px;
+  display: inline-block;
+}
+
+.pk-players {
+  font-size: 24px;
+  font-weight: bold;
+  color: #333;
+}
+
+.pk-players span {
+  color: #667eea;
+}
+
+/* 游戏玩家列表 */
+.game-players {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.game-players li {
+  cursor: pointer;
+  transition: all 0.2s;
+  user-select: none;
+}
+
+.game-players li:hover:not(.eliminated) {
+  background: #e9ecef;
+}
+
+.game-players li.selected {
+  background: #667eea;
+  color: white;
+}
+
+.game-players li.selected::before {
+  content: '✓';
+  color: white;
+}
+
+.game-players li.eliminated {
+  opacity: 0.5;
+  text-decoration: line-through;
+  cursor: not-allowed;
+}
+
+.game-players li.pk-player {
+  background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+  color: white;
+  animation: pk-blink 1s infinite;
+}
+
+@keyframes pk-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.game-players li.pk-player::before {
+  content: 'PK';
+  color: white;
+}
+
+.host-badge {
+  background: #667eea;
+  color: white;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* 房主控制按钮 */
+.host-controls {
+  display: flex;
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.host-controls .btn {
+  flex: 1;
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+  color: white;
+}
+
+.btn-danger:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4);
+}
+
+/* 投票控制 */
+.vote-controls {
+  margin-top: auto;
+}
+
+.vote-controls .btn {
+  width: 100%;
+}
+
+/* 提示文字 */
+.hint {
+  font-size: 14px;
+  color: #888;
+  margin-top: 5px;
+  display: block;
+}
+
 /* 响应式 */
 @media (min-width: 768px) {
   .screen {
@@ -513,5 +676,9 @@ body {
   
   .action-area input {
     width: 100%;
+  }
+  
+  .host-controls {
+    flex-direction: column;
   }
 }
