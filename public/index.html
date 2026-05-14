@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>谁是卧底</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 主菜单 -->
+    <div id="mainMenu" class="screen active">
+      <div class="logo">🎭 谁是卧底</div>
+      <div class="subtitle">Who is Undercover</div>
+      <div class="menu-buttons">
+        <button id="createRoomBtn" class="btn btn-primary">创建房间</button>
+        <button id="joinRoomBtn" class="btn btn-secondary">加入房间</button>
+        <button id="settingsBtn" class="btn btn-outline">游戏设置</button>
+      </div>
+      <div class="footer">支持 iOS / Android</div>
+    </div>
+
+    <!-- 创建房间 -->
+    <div id="createRoom" class="screen">
+      <div class="header">
+        <button id="backFromCreate" class="back-btn">← 返回</button>
+        <h2>创建房间</h2>
+      </div>
+      <div class="form-container">
+        <div class="form-group">
+          <label>总人数</label>
+          <div class="number-input">
+            <button class="num-btn" onclick="adjustNumber('totalPlayers', -1)">-</button>
+            <input type="number" id="totalPlayers" value="6" min="3" max="12">
+            <button class="num-btn" onclick="adjustNumber('totalPlayers', 1)">+</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>卧底人数</label>
+          <div class="number-input">
+            <button class="num-btn" onclick="adjustNumber('undercoverCount', -1)">-</button>
+            <input type="number" id="undercoverCount" value="2" min="1" max="5">
+            <button class="num-btn" onclick="adjustNumber('undercoverCount', 1)">+</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>白板人数</label>
+          <div class="number-input">
+            <button class="num-btn" onclick="adjustNumber('whiteboardCount', -1)">-</button>
+            <input type="number" id="whiteboardCount" value="0" min="0" max="3">
+            <button class="num-btn" onclick="adjustNumber('whiteboardCount', 1)">+</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>你的昵称</label>
+          <input type="text" id="creatorName" placeholder="请输入昵称">
+        </div>
+        <button id="createBtn" class="btn btn-primary full-width">创建房间</button>
+      </div>
+    </div>
+
+    <!-- 加入房间 -->
+    <div id="joinRoom" class="screen">
+      <div class="header">
+        <button id="backFromJoin" class="back-btn">← 返回</button>
+        <h2>加入房间</h2>
+      </div>
+      <div class="form-container">
+        <div class="form-group">
+          <label>房间号</label>
+          <input type="text" id="roomIdInput" placeholder="请输入房间号（如：ABC123）" maxlength="6">
+        </div>
+        <div class="form-group">
+          <label>你的昵称</label>
+          <input type="text" id="playerName" placeholder="请输入昵称">
+        </div>
+        <button id="joinBtn" class="btn btn-primary full-width">加入房间</button>
+      </div>
+    </div>
+
+    <!-- 设置页面 -->
+    <div id="settings" class="screen">
+      <div class="header">
+        <button id="backFromSettings" class="back-btn">← 返回</button>
+        <h2>游戏设置</h2>
+      </div>
+      <div class="form-container">
+        <div class="form-group">
+          <label class="toggle-label">
+            <input type="checkbox" id="useAI"> 使用AI生成词语
+          </label>
+        </div>
+        <div id="aiConfig" class="hidden">
+          <div class="form-group">
+            <label>API地址</label>
+            <input type="text" id="apiUrl" placeholder="https://api.example.com/chat/completions">
+          </div>
+          <div class="form-group">
+            <label>API密钥</label>
+            <input type="password" id="apiKey" placeholder="sk-...">
+          </div>
+          <div class="form-group">
+            <label>模型名称</label>
+            <input type="text" id="modelName" placeholder="gpt-3.5-turbo">
+          </div>
+        </div>
+        <button id="saveSettingsBtn" class="btn btn-primary full-width">保存设置</button>
+      </div>
+    </div>
+
+    <!-- 等待房间 -->
+    <div id="waitingRoom" class="screen">
+      <div class="header">
+        <button id="leaveRoomBtn" class="back-btn">← 离开</button>
+        <h2>房间 <span id="roomIdDisplay"></span></h2>
+      </div>
+      <div class="room-id-section">
+        <div class="room-id-label">房间号</div>
+        <div class="room-id-value" id="roomIdValue"></div>
+        <button id="copyRoomIdBtn" class="btn btn-secondary copy-btn">复制房间号</button>
+        <button id="shareBtn" class="btn btn-outline share-btn">分享给好友</button>
+      </div>
+      <div class="room-info">
+        <div class="info-row">
+          <span>总人数:</span>
+          <span id="totalPlayersDisplay">0</span>
+        </div>
+        <div class="info-row">
+          <span>卧底:</span>
+          <span id="undercoverDisplay">0</span>
+        </div>
+        <div class="info-row">
+          <span>白板:</span>
+          <span id="whiteboardDisplay">0</span>
+        </div>
+      </div>
+      <div class="players-list">
+        <h3>已加入玩家</h3>
+        <ul id="playersList"></ul>
+      </div>
+      <button id="startGameBtn" class="btn btn-primary full-width">开始游戏</button>
+    </div>
+
+    <!-- 游戏界面 -->
+    <div id="gameScreen" class="screen">
+      <div class="header">
+        <span class="round-info">第 {{currentRound}} 轮</span>
+        <h2>游戏进行中</h2>
+      </div>
+      
+      <!-- 身份卡片 -->
+      <div class="identity-card" id="identityCard">
+        <div class="card-header">{{roleText}}</div>
+        <div class="card-word">{{wordText}}</div>
+      </div>
+
+      <!-- 发言区域 -->
+      <div class="speaking-area">
+        <div class="speaker-indicator" id="speakerIndicator"></div>
+        <div class="chat-messages" id="chatMessages"></div>
+      </div>
+
+      <!-- 操作区域 -->
+      <div class="action-area">
+        <input type="text" id="speakInput" placeholder="请描述你的词语..." maxlength="50">
+        <button id="speakBtn" class="btn btn-primary">发送</button>
+      </div>
+    </div>
+
+    <!-- 投票界面 -->
+    <div id="votingScreen" class="screen">
+      <div class="header">
+        <h2>投票阶段</h2>
+      </div>
+      <div class="voting-title">请选择你要投票淘汰的玩家</div>
+      <div class="players-grid" id="votingPlayers"></div>
+    </div>
+
+    <!-- 投票结果 -->
+    <div id="voteResult" class="screen">
+      <div class="result-icon">{{voteResultIcon}}</div>
+      <div class="result-title">{{voteResultTitle}}</div>
+      <div class="result-content">{{voteResultContent}}</div>
+      <div class="result-role">{{voteResultRole}}</div>
+      <button id="continueBtn" class="btn btn-primary">继续游戏</button>
+    </div>
+
+    <!-- 游戏结束 -->
+    <div id="gameOver" class="screen">
+      <div class="result-icon">{{gameOverIcon}}</div>
+      <div class="result-title">{{gameOverTitle}}</div>
+      <div class="result-content">{{gameOverContent}}</div>
+      <div class="words-reveal">
+        <div>平民词: <span class="word-highlight">{{civilianWord}}</span></div>
+        <div>卧底词: <span class="word-highlight">{{undercoverWord}}</span></div>
+      </div>
+      <button id="backToMenuBtn" class="btn btn-primary">返回主菜单</button>
+    </div>
+
+    <!-- 错误提示 -->
+    <div id="errorToast" class="toast hidden"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
