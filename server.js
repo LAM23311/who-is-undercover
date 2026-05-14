@@ -17,6 +17,10 @@ app.use(cors());
 app.use(express.static('public'));
 app.use(express.json());
 
+app.get('/', (req, res) => {
+  res.sendFile(__dirname + '/public/index.html');
+});
+
 let rooms = {};
 let apiConfig = {
   enabled: false,
